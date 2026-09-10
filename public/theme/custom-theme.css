@@ -1,0 +1,22 @@
+/*
+ * 业务方自定义主题覆盖口子。
+ * 覆盖当前语义变量即可替换品牌色、画布、表面、边框、文字和阴影，不需要改 Vue 代码。
+ */
+
+/*
+:root {
+  --iam-canvas: #f8f5ff;
+  --iam-surface: #ffffff;
+  --iam-surface-raised: #ffffff;
+  --iam-surface-soft: #ede9fe;
+  --iam-divider: #ddd6fe;
+  --iam-text: #24133f;
+  --iam-muted: #6b5a85;
+  --iam-primary: #7c3aed;
+  --iam-primary-hover: #6d28d9;
+  --iam-primary-weak: #c4b5fd;
+  --iam-focus: #a78bfa;
+  --iam-shadow-sm: 0 2px 8px rgba(124, 58, 237, 0.1);
+  --iam-shadow-lg: 0 20px 52px rgba(124, 58, 237, 0.16);
+}
+*/
