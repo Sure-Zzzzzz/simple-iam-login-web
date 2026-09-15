@@ -39,6 +39,8 @@ export interface ConsentInfo {
   registeredClientId: string;
   clientId: string;
   clientName: string;
+  applicationName: string;
+  applicationIcon: string | null;
   state: string;
   requestedScopes: string[];
   previouslyApprovedScopes: string[];

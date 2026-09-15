@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import defaultLogoUrl from '../assets/sure-zzzzzz-logo.svg';
 import { DEFAULT_BRAND_NAME, fetchBranding, fetchConsentInfo, type ConsentInfo } from '../api/iamAuth';
 import { initializeTheme } from '../theme';
+import { trustedApplicationIcon } from '../trustedApplicationIcons';
 
 const params = new URLSearchParams(window.location.search);
 const state = params.get('state') ?? '';
@@ -12,7 +12,6 @@ const errorMessage = ref('');
 const consentInfo = ref<ConsentInfo | null>(null);
 const approvedScopes = ref<Set<string>>(new Set());
 const brandName = ref(DEFAULT_BRAND_NAME);
-const brandLogoUrl = ref(defaultLogoUrl);
 
 const SCOPE_LABELS: Record<string, string> = {
   openid: 'OpenID 身份标识',
@@ -23,6 +22,7 @@ const SCOPE_LABELS: Record<string, string> = {
 
 const requiredScopes = computed(() => consentInfo.value?.requestedScopes.filter(scope => scope === 'openid') || []);
 const optionalScopes = computed(() => consentInfo.value?.requestedScopes.filter(scope => scope !== 'openid') || []);
+const applicationIdentity = computed(() => trustedApplicationIcon(consentInfo.value?.applicationIcon));
 
 function scopeLabel(scope: string): string {
   return SCOPE_LABELS[scope] ?? scope;
@@ -33,7 +33,6 @@ onMounted(async () => {
   try {
     const branding = await fetchBranding();
     brandName.value = branding.name || DEFAULT_BRAND_NAME;
-    brandLogoUrl.value = branding.logoUrl || defaultLogoUrl;
   } catch {
     // 品牌加载失败不阻断流程
   }
@@ -64,23 +63,27 @@ function toggleScope(scope: string) {
 </script>
 
 <template>
-  <main class="auth-shell">
-    <aside class="auth-brand-panel consent-brand-panel" aria-label="授权说明">
-      <div class="auth-brand-lockup">
-        <img :src="brandLogoUrl" :alt="brandName">
-        <span>{{ brandName }}</span>
-      </div>
-      <div class="auth-brand-copy">
-        <span class="auth-eyebrow">SECURE AUTHORIZATION</span>
+  <main class="login-shell consent-shell">
+    <aside class="login-brand-panel consent-brand-panel" aria-label="授权说明">
+      <span class="login-brand-glow login-brand-glow--lower" aria-hidden="true"></span>
+      <span class="login-brand-glow login-brand-glow--upper" aria-hidden="true"></span>
+      <div class="login-brand-copy">
+        <span class="login-eyebrow">统一身份与访问管理</span>
         <h1>确认应用访问<br>你的身份信息</h1>
-        <p>你可以查看应用请求的每项权限，并仅授予你同意共享的信息。</p>
+        <p>仅在你确认后，应用才能获得本次请求的身份信息。</p>
       </div>
+      <ul class="login-trust-list" aria-label="授权保障">
+        <li><span aria-hidden="true">01</span>请求范围清晰可见</li>
+        <li><span aria-hidden="true">02</span>可选信息由你决定</li>
+        <li><span aria-hidden="true">03</span>授权记录可审计</li>
+      </ul>
+      <p class="login-copyright">© 2026 统一身份与访问管理平台</p>
     </aside>
 
-    <section class="auth-content" aria-labelledby="consent-title">
-      <div class="auth-card consent-card">
-        <header class="auth-card-header">
-          <p class="auth-kicker">统一认证中心</p>
+    <section class="login-content consent-content" aria-labelledby="consent-title">
+      <div class="login-card consent-card">
+        <header class="login-card-header">
+          <p class="login-kicker">{{ brandName }}</p>
           <h2 id="consent-title">授权确认</h2>
           <p>请确认本次应用访问范围。</p>
         </header>
@@ -90,8 +93,16 @@ function toggleScope(scope: string) {
 
         <template v-else-if="consentInfo">
           <section class="consent-application" aria-label="请求授权的应用">
-            <span>正在请求授权</span>
-            <strong>{{ consentInfo.clientName || consentInfo.clientId }}</strong>
+            <span class="consent-application-icon" :aria-label="applicationIdentity.label" role="img">
+              <component :is="applicationIdentity.component" :size="24" :stroke-width="2" aria-hidden="true" />
+            </span>
+            <div>
+              <span>正在请求授权</span>
+              <strong>{{ consentInfo.applicationName || consentInfo.clientName || consentInfo.clientId }}</strong>
+              <small v-if="consentInfo.applicationName && consentInfo.applicationName !== consentInfo.clientName">
+                {{ consentInfo.clientName }}
+              </small>
+            </div>
           </section>
 
           <form action="/oauth2/authorize" method="POST" class="consent-form">

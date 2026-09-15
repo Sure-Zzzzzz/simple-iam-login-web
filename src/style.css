@@ -69,7 +69,7 @@ button:focus-visible, input:focus-visible {
   padding: clamp(32px, 5vw, 72px);
 }
 
-.auth-card-header, .scope-section-heading, .scope-item label {
+.scope-section-heading, .scope-item label {
   align-items: center;
   display: flex;
 }
@@ -101,10 +101,12 @@ button:focus-visible, input:focus-visible {
 .btn-primary:disabled { background: var(--iam-primary-weak); border-color: var(--iam-primary-weak); cursor: not-allowed; }
 .btn-secondary { background: transparent; border: 1px solid var(--iam-divider); border-radius: 9px; color: var(--iam-text); cursor: pointer; font-weight: 650; min-height: 44px; padding: 10px 16px; transition: border-color .15s, background .15s; width: 100%; }
 .btn-secondary:hover { background: var(--iam-surface-soft); border-color: var(--iam-primary); color: var(--iam-primary); }
-.consent-card { max-width: 540px; }
-.consent-application { background: var(--iam-surface-soft); border: 1px solid color-mix(in srgb, var(--iam-primary) 18%, var(--iam-divider)); border-radius: 16px; display: grid; gap: 4px; margin-bottom: 24px; padding: 14px 16px; }
-.consent-application span { color: var(--iam-muted); font-size: 12px; }
-.consent-application strong { color: var(--iam-text); font-size: 16px; }
+.consent-content .consent-card { padding-bottom: 32px; padding-top: 42px; }
+.consent-application { align-items: center; background: var(--iam-surface-soft); border: 1px solid color-mix(in srgb, var(--iam-primary) 18%, var(--iam-divider)); border-radius: 12px; display: grid; gap: 14px; grid-template-columns: 48px minmax(0, 1fr); margin-bottom: 24px; padding: 14px 16px; }
+.consent-application-icon { align-items: center; background: var(--iam-surface); border: 1px solid var(--iam-divider); border-radius: 10px; color: var(--iam-primary); display: inline-flex; height: 48px; justify-content: center; width: 48px; }
+.consent-application > div { display: grid; gap: 3px; min-width: 0; }
+.consent-application > div > span, .consent-application small { color: var(--iam-muted); font-size: 12px; line-height: 1.4; }
+.consent-application strong { color: var(--iam-text); font-size: 16px; overflow-wrap: anywhere; }
 .consent-form { display: grid; gap: 18px; }
 .scope-section { border: 1px solid var(--iam-divider); border-radius: 16px; padding: 16px; }
 .scope-section-heading { align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }

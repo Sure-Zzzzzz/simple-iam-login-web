@@ -6,9 +6,10 @@ IAM 的登录与授权确认前端，提供 `/login`、`/consent` 与 `/change-p
 
 ## 兼容性与发布
 
-- IAM Server：`1.0.x`
-- IAM Contract：`1.0.x`
+- IAM Server：`1.1.x`
+- IAM Contract：`1.1.x`
 - 首次独立发布计划与 IAM Server `1.0.0` 对齐，使用同版本 Git tag `v1.0.0`。
+- `1.0.1` 对齐 IAM Server `1.1.1` 的 Consent 应用身份字段；历史 Client 没有关联可信应用时仍回退 Client 名称和默认图标。
 - 后续 Web patch 可独立发布，但必须在 release notes 中声明兼容的 Server 与 Contract 范围。
 
 权威 API 契约由 IAM Server 仓库的 `sdk/auth/iam/contract/` 维护；不得调用未声明接口。
