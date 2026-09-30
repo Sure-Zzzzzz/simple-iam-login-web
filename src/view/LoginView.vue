@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import { DEFAULT_BRAND_NAME, fetchAuthorizeUrl, fetchBranding, fetchCaptcha, fetchLoginProviders, login, LoginError, type Branding, type CaptchaChallenge, type LoginProvider } from '../api/iamAuth';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { createPhoneChallenge, DEFAULT_BRAND_NAME, fetchAuthorizeUrl, fetchBranding, fetchCaptcha, fetchLoginProviders, login, LoginError, phoneLogin, resetPasswordByPhone, type Branding, type CaptchaChallenge, type LoginProvider } from '../api/iamAuth';
 import { initializeTheme } from '../theme';
 
 const username = ref('');
 const password = ref('');
+const phone = ref('');
+const phoneCode = ref('');
+const phoneChallengeId = ref('');
+const phoneCodeCooldown = ref(0);
+let phoneCooldownTimer: number | undefined;
 const usernameInput = ref<HTMLInputElement | null>(null);
 const showPassword = ref(false);
 const loading = ref(false);
@@ -25,15 +30,47 @@ const callbackError = new URLSearchParams(window.location.search).get('error');
 
 const currentProvider = computed(() =>
   passwordProviders.value.find(provider => provider.code === selectedProviderCode.value) || null);
+const isPhoneMode = computed(() => currentProvider.value?.type === 'phone');
+
+const formProviders = computed(() => passwordProviders.value);
+
+// 短信能力声明的区号列表（出入口统一：list 直渲染，无单/多区号分支）；提交时组件内拼 E.164
+const phoneRegions = computed(() => {
+  const raw = passwordProviders.value.find(provider => provider.type === 'phone')?.supportedRegions;
+  if (!raw) {
+    return [];
+  }
+  return raw.split(',').map(region => region.trim()).filter(region => region.length > 0);
+});
+const phoneRegion = ref('');
+watch(phoneRegions, regions => {
+  if (regions.length > 0 && !regions.includes(phoneRegion.value)) {
+    phoneRegion.value = regions[0];
+  }
+});
+// 自绘 listbox(IAB webview 原生 select 弹层坐标不可靠,页面内渲染物理上不飞)
+const regionMenuOpen = ref(false);
+function closeRegionMenu() {
+  regionMenuOpen.value = false;
+}
+function toggleRegionMenu() {
+  regionMenuOpen.value = !regionMenuOpen.value;
+}
+function chooseRegion(region: string) {
+  phoneRegion.value = region;
+  regionMenuOpen.value = false;
+}
+const fullPhone = computed(() => phoneRegion.value + phone.value.trim());
+
 const providerSubtitle = computed(() => {
-  if (passwordProviders.value.length > 1 && currentProvider.value) {
-    return `请使用${currentProvider.value.name}。`;
+  if (isPhoneMode.value) {
+    return '请使用绑定的手机号获取验证码登录。';
+  }
+  if (passwordProviders.value.length > 1) {
+    return '请选择登录方式，使用对应账号登录。';
   }
   return '请使用你的账号登录。';
 });
-const otherPasswordProviders = computed(() =>
-  passwordProviders.value.filter(provider => provider.code !== selectedProviderCode.value));
-
 const callbackErrorMessages: Record<string, string> = {
   'login-failed': '登录失败，请重试',
   'BIZ_002': '账号或密码错误',
@@ -81,11 +118,16 @@ async function loadCaptcha() {
 
 onMounted(() => {
   initializeTheme();
+  document.addEventListener('click', closeRegionMenu);
   if (callbackError) {
     errorMessage.value = callbackErrorMessages[callbackError] || '登录失败，请重试';
   }
   loadBranding();
   loadProviders();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeRegionMenu);
 });
 
 async function loadBranding() {
@@ -102,7 +144,7 @@ async function loadProviders() {
   try {
     const result = await fetchLoginProviders();
     passwordProviders.value = result.providers.filter(
-      provider => provider.enabled && (provider.type === 'password' || provider.type === 'ldap')
+      provider => provider.enabled && (provider.type === 'password' || provider.type === 'ldap' || provider.type === 'phone')
     );
     ssoProviders.value = result.providers.filter(provider => provider.enabled && provider.type === 'sso');
     const defaultPasswordProvider = passwordProviders.value.find(
@@ -117,7 +159,96 @@ async function loadProviders() {
   }
 }
 
+async function sendPhoneCode() {
+  if (!phone.value.trim()) {
+    errorMessage.value = '请输入手机号';
+    return;
+  }
+  if (phoneCodeCooldown.value > 0) return;
+  try {
+    const result = await createPhoneChallenge({ phone: fullPhone.value, purpose: 'login' });
+    phoneChallengeId.value = result.challengeId;
+    successMessage.value = '验证码已发送';
+    errorMessage.value = '';
+    phoneCodeCooldown.value = result.resendAfterSeconds ?? 60;
+    phoneCooldownTimer = window.setInterval(() => {
+      phoneCodeCooldown.value -= 1;
+      if (phoneCodeCooldown.value <= 0 && phoneCooldownTimer) {
+        window.clearInterval(phoneCooldownTimer);
+      }
+    }, 1000);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '验证码发送失败';
+    successMessage.value = '';
+  }
+}
+
+async function submitPhoneLogin() {
+  if (!phone.value.trim() || !phoneCode.value.trim() || !phoneChallengeId.value) {
+    errorMessage.value = '请输入手机号并完成验证码';
+    return;
+  }
+  loading.value = true;
+  errorMessage.value = '';
+  successMessage.value = '';
+  try {
+    const result = await phoneLogin(phoneChallengeId.value, phoneCode.value.trim(), fullPhone.value);
+    successMessage.value = result.message || '登录成功';
+    window.location.assign(redirectTarget || '/');
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '验证码错误或已失效';
+  } finally {
+    loading.value = false;
+  }
+}
+
+const forgotMode = ref(false);
+const forgotChallengeId = ref('');
+const forgotCode = ref('');
+const forgotNewPassword = ref('');
+
+async function sendForgotCode() {
+  if (!phone.value.trim() || phoneCodeCooldown.value > 0) return;
+  try {
+    const result = await createPhoneChallenge({ phone: fullPhone.value, purpose: 'forgot-password' });
+    forgotChallengeId.value = result.challengeId;
+    successMessage.value = '验证码已发送';
+    errorMessage.value = '';
+    phoneCodeCooldown.value = result.resendAfterSeconds ?? 60;
+    phoneCooldownTimer = window.setInterval(() => {
+      phoneCodeCooldown.value -= 1;
+      if (phoneCodeCooldown.value <= 0 && phoneCooldownTimer) window.clearInterval(phoneCooldownTimer);
+    }, 1000);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '验证码发送失败';
+    successMessage.value = '';
+  }
+}
+
+async function submitForgot() {
+  if (!phone.value.trim() || !forgotCode.value.trim() || !forgotNewPassword.value || !forgotChallengeId.value) {
+    errorMessage.value = '请完整填写手机号、验证码与新密码';
+    return;
+  }
+  loading.value = true;
+  errorMessage.value = '';
+  successMessage.value = '';
+  try {
+    await resetPasswordByPhone(forgotChallengeId.value, forgotCode.value.trim(), fullPhone.value, forgotNewPassword.value);
+    successMessage.value = '密码重置成功，全部会话已吊销，请用新密码登录';
+    forgotMode.value = false;
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '重置失败';
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function submitLogin() {
+  if (isPhoneMode.value) {
+    await submitPhoneLogin();
+    return;
+  }
   if (!canSubmit()) {
     if (!username.value.trim() || !password.value.length) {
       errorMessage.value = '请输入账号和密码';
@@ -228,45 +359,155 @@ function resolveRedirectTarget() {
       >
         <header class="login-card-header">
           <p class="login-kicker">统一认证中心</p>
-          <h2 id="login-title">登录</h2>
-          <p>{{ providerSubtitle }}</p>
+          <h2 id="login-title">{{ forgotMode ? '重置密码' : '登录' }}</h2>
+          <p>{{ forgotMode ? '通过手机号验证重置密码' : providerSubtitle }}</p>
         </header>
 
-        <form class="login-form" @submit.prevent="submitLogin">
+        <div v-if="!forgotMode && formProviders.length > 1" class="login-tabs" role="tablist" aria-label="登录方式">
+          <button
+            v-for="provider in formProviders"
+            :key="provider.code"
+            type="button"
+            role="tab"
+            :aria-selected="selectedProviderCode === provider.code"
+            :class="['login-tab', { 'login-tab--active': selectedProviderCode === provider.code }]"
+            @click="selectProvider(provider.code)"
+          >
+            {{ provider.name }}
+          </button>
+        </div>
+
+        <form v-if="forgotMode" class="login-form" @submit.prevent="submitForgot">
           <label>
-            <span>账号</span>
-            <input ref="usernameInput" v-model="username" type="text" autocomplete="username" placeholder="请输入账号">
+            <span>手机号</span>
+            <span class="login-phone-row">
+              <span v-if="phoneRegions.length > 0" class="login-phone-region">
+                <button
+                  type="button"
+                  class="login-phone-region-toggle"
+                  :aria-expanded="regionMenuOpen"
+                  aria-haspopup="listbox"
+                  aria-label="国家/地区区号"
+                  @click.stop="toggleRegionMenu"
+                  @keydown.esc="closeRegionMenu"
+                >
+                  {{ phoneRegion }}
+                  <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+                <ul v-if="regionMenuOpen" class="login-phone-region-menu" role="listbox" aria-label="区号列表">
+                  <li
+                    v-for="region in phoneRegions"
+                    :key="region"
+                    role="option"
+                    :aria-selected="region === phoneRegion"
+                    :class="['login-phone-region-option', { 'login-phone-region-option--active': region === phoneRegion }]"
+                    @click.stop="chooseRegion(region)"
+                  >{{ region }}</li>
+                </ul>
+              </span>
+              <input v-model="phone" type="tel" autocomplete="tel-national" placeholder="请输入绑定的手机号">
+            </span>
           </label>
           <label>
-            <span>密码</span>
-            <div class="login-password-field">
-              <input
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                autocomplete="current-password"
-                placeholder="请输入密码"
-              >
-              <button
-                type="button"
-                class="login-password-toggle"
-                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
-                :aria-pressed="showPassword"
-                @click="showPassword = !showPassword"
-              >
-                <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
+            <span>验证码</span>
+            <span class="login-captcha-row">
+              <input v-model="forgotCode" type="text" inputmode="numeric" maxlength="6" placeholder="短信验证码">
+              <button type="button" class="login-code-send" :disabled="phoneCodeCooldown > 0" @click="sendForgotCode">
+                {{ phoneCodeCooldown > 0 ? phoneCodeCooldown + 's' : '获取验证码' }}
               </button>
-            </div>
+            </span>
           </label>
-          <div v-if="captchaRequired" class="login-captcha">
+          <label>
+            <span>新密码</span>
+            <input v-model="forgotNewPassword" type="password" autocomplete="new-password" placeholder="请输入新密码">
+          </label>
+          <button type="submit" class="login-submit" :disabled="loading">
+            {{ loading ? '正在重置…' : '重置密码' }}
+          </button>
+          <button type="button" class="login-provider-switch-link" @click="forgotMode = false">返回登录</button>
+        </form>
+
+        <form v-else class="login-form" @submit.prevent="submitLogin">
+          <template v-if="isPhoneMode">
+            <label>
+              <span>手机号</span>
+              <span class="login-phone-row">
+                <span v-if="phoneRegions.length > 0" class="login-phone-region">
+                  <button
+                    type="button"
+                    class="login-phone-region-toggle"
+                    :aria-expanded="regionMenuOpen"
+                    aria-haspopup="listbox"
+                    aria-label="国家/地区区号"
+                    @click.stop="toggleRegionMenu"
+                    @keydown.esc="closeRegionMenu"
+                  >
+                    {{ phoneRegion }}
+                    <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </button>
+                  <ul v-if="regionMenuOpen" class="login-phone-region-menu" role="listbox" aria-label="区号列表">
+                    <li
+                      v-for="region in phoneRegions"
+                      :key="region"
+                      role="option"
+                      :aria-selected="region === phoneRegion"
+                      :class="['login-phone-region-option', { 'login-phone-region-option--active': region === phoneRegion }]"
+                      @click.stop="chooseRegion(region)"
+                    >{{ region }}</li>
+                  </ul>
+                </span>
+                <input v-model="phone" type="tel" autocomplete="tel-national" placeholder="请输入手机号">
+              </span>
+            </label>
+            <label>
+              <span>验证码</span>
+              <span class="login-captcha-row">
+                <input v-model="phoneCode" type="text" inputmode="numeric" maxlength="6" placeholder="短信验证码">
+                <button type="button" class="login-code-send" :disabled="phoneCodeCooldown > 0" @click="sendPhoneCode">
+                  {{ phoneCodeCooldown > 0 ? phoneCodeCooldown + 's' : '获取验证码' }}
+                </button>
+              </span>
+            </label>
+          </template>
+          <template v-else>
+            <label>
+              <span>账号</span>
+              <input ref="usernameInput" v-model="username" type="text" autocomplete="username" placeholder="请输入账号">
+            </label>
+            <label>
+              <span>密码</span>
+              <div class="login-password-field">
+                <input
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  placeholder="请输入密码"
+                >
+                <button
+                  type="button"
+                  class="login-password-toggle"
+                  :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                  :aria-pressed="showPassword"
+                  @click="showPassword = !showPassword"
+                >
+                  <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </label>
+            <div v-if="currentProvider?.type === 'password' && phoneRegions.length > 0" class="login-forgot-row">
+              <button type="button" class="login-provider-switch-link" @click="forgotMode = true; errorMessage = ''; successMessage = ''">忘记密码？</button>
+            </div>
+          </template>
+          <div v-if="captchaRequired && !isPhoneMode" class="login-captcha">
             <template v-if="captcha && captcha.type === 'image'">
               <label>
                 <span class="login-captcha-field-head">
@@ -303,17 +544,7 @@ function resolveRedirectTarget() {
           </button>
         </form>
 
-        <div v-if="otherPasswordProviders.length > 0" class="login-provider-switch">
-          <button
-            v-for="provider in otherPasswordProviders"
-            :key="provider.code"
-            type="button"
-            class="login-provider-switch-link"
-            @click="selectProvider(provider.code)"
-          >
-            使用 {{ provider.name }} →
-          </button>
-        </div>
+
 
         <section v-if="ssoProviders.length > 0" class="login-external-providers" aria-label="其他登录方式">
           <div class="login-divider"><span>其他登录方式</span></div>

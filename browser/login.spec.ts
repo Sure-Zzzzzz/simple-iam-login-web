@@ -45,7 +45,7 @@ test('1920 视口下登录卡应垂直居中', async ({ page }) => {
   expect(Math.abs(cardCenterY - 1080 / 2)).toBeLessThan(2);
 });
 
-test('LDAP 登录方式应以底部切换链接呈现并在提交时携带 provider', async ({ page }) => {
+test('LDAP 登录方式应以登录方式标签呈现并在提交时携带 provider', async ({ page }) => {
   await brandingRoute(page);
   await page.route('**/iam/web/auth/providers', route => route.fulfill({
     json: {
@@ -60,13 +60,13 @@ test('LDAP 登录方式应以底部切换链接呈现并在提交时携带 provi
     route.fulfill({ json: { headerName: 'X-CSRF-TOKEN', parameterName: '_csrf', token: 'token-1' } }));
   const loginRequest = page.waitForRequest(request => request.url().includes('/iam/web/auth/login'));
   await page.route('**/iam/web/auth/login', route =>
-    route.fulfill({ json: { message: '登录成功', user: { userId: 1, username: 'ops-user', displayName: null, admin: false, authorities: [] } } }));
+    route.fulfill({ json: { message: '登录成功', user: { subjectId: 'sid-ops-user', username: 'ops-user', displayName: null, admin: false, authorities: [] } } }));
 
   await page.goto('/login');
-  await expect(page.getByText('请使用账号密码登录。')).toBeVisible();
-  await page.getByRole('button', { name: '使用 LDAP 登录 →' }).click();
-  await expect(page.getByText('请使用LDAP 登录。')).toBeVisible();
-  await expect(page.getByRole('button', { name: '使用 账号密码登录 →' })).toBeVisible();
+  await expect(page.getByText('请选择登录方式，使用对应账号登录。')).toBeVisible();
+  await expect(page.getByRole('tab', { name: '账号密码登录', selected: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'LDAP 登录' }).click();
+  await expect(page.getByRole('tab', { name: 'LDAP 登录', selected: true })).toBeVisible();
 
   await page.getByRole('textbox', { name: '账号' }).fill('ops-user');
   await page.getByRole('textbox', { name: '密码' }).fill('Ldap@1234');
@@ -126,7 +126,7 @@ test('登录被要求人机验证时应展示验证码区块并在重试时携�
     const body = request.postDataJSON();
     if (body.captchaAnswer === 'ab3d') {
       await route.fulfill({
-        json: { message: '登录成功', user: { userId: 1, username: 'admin', displayName: null, admin: true, authorities: [] } }
+        json: { message: '登录成功', user: { subjectId: 'sid-admin', username: 'admin', displayName: null, admin: true, authorities: [] } }
       });
     } else {
       await route.fulfill({

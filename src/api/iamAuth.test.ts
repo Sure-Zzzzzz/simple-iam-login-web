@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { changePassword, fetchAuthorizeUrl, fetchCaptcha, fetchCsrfToken, fetchLoginProviders, LoginError, login } from './iamAuth';
+import { changePassword, createPhoneChallenge, fetchAuthorizeUrl, fetchCaptcha, fetchCsrfToken, fetchLoginProviders, LoginError, login, phoneLogin, resetPasswordByPhone } from './iamAuth';
 
 describe('iamAuth api', () => {
   it('fetchLoginProviders 应携带 cookie 并解析登录方式列表', async () => {
@@ -32,6 +32,45 @@ describe('iamAuth api', () => {
       token: 'token-1'
     });
     expect(fetchMock).toHaveBeenCalledWith('/iam/web/auth/csrf', { credentials: 'include' });
+  });
+
+  it('手机号挑战在短信能力未装配时应识别服务端 404', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ headerName: 'X-CSRF-TOKEN', parameterName: '_csrf', token: 'token-1' })
+      })
+      .mockResolvedValueOnce({ ok: false, status: 404 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createPhoneChallenge({ phone: '13800000000', purpose: 'login' })).rejects.toThrow('短信能力未开放');
+  });
+
+  it('手机号登录与密码重置应透传服务端 400 的具体失败原因', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ headerName: 'X-CSRF-TOKEN', parameterName: '_csrf', token: 'token-1' })
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ message: '验证码错误或已失效' })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ headerName: 'X-CSRF-TOKEN', parameterName: '_csrf', token: 'token-1' })
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ message: '该手机号未完成验证，请联系管理员重置密码' })
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(phoneLogin('challenge-1', '123456', '13800000000')).rejects.toThrow('验证码错误或已失效');
+    await expect(resetPasswordByPhone('challenge-2', '123456', '13800000000', 'NewPass@1234'))
+      .rejects.toThrow('该手机号未完成验证，请联系管理员重置密码');
   });
 
   it('CSRF 请求失败时应返回可行动的安全登录会话提示', async () => {

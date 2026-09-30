@@ -13,7 +13,8 @@ const onlyPasswordProviders = {
       type: 'password',
       enabled: true,
       authorizeUrl: null,
-      description: '使用账号和密码登录'
+      description: '使用账号和密码登录',
+      supportedRegions: null
     },
     {
       code: 'ldap-password',
@@ -21,7 +22,8 @@ const onlyPasswordProviders = {
       type: 'ldap',
       enabled: false,
       authorizeUrl: null,
-      description: '预留 LDAP bind 凭证校验入口，1.0.0 默认关闭'
+      description: '预留 LDAP bind 凭证校验入口，1.0.0 默认关闭',
+      supportedRegions: null
     },
     {
       code: 'enterprise-sso',
@@ -29,7 +31,8 @@ const onlyPasswordProviders = {
       type: 'sso',
       enabled: false,
       authorizeUrl: null,
-      description: '预留 OIDC / SAML / CAS 单点登录入口，1.0.0 默认关闭'
+      description: '预留 OIDC / SAML / CAS 单点登录入口，1.0.0 默认关闭',
+      supportedRegions: null
     }
   ]
 };
@@ -99,7 +102,8 @@ describe('LoginView', () => {
           type: 'sso',
           enabled: true,
           authorizeUrl: 'https://sso.example.com/authorize',
-          description: null
+          description: null,
+          supportedRegions: null
         }
       ]
     });
@@ -124,14 +128,15 @@ describe('LoginView', () => {
           type: 'ldap',
           enabled: true,
           authorizeUrl: null,
-          description: null
+          description: null,
+          supportedRegions: null
         }
       ]
     });
     const loginSpy = vi.spyOn(iamAuth, 'login').mockResolvedValue({
       message: '登录成功',
       user: {
-        userId: 2,
+        subjectId: 'sid-2',
         username: 'ops-user',
         displayName: 'ops-user',
         admin: false,
@@ -147,16 +152,16 @@ describe('LoginView', () => {
     const wrapper = mount(LoginView);
     await flushPromises();
 
-    expect(wrapper.text()).toContain('请使用账号密码登录。');
-    const switchLinks = wrapper.findAll('.login-provider-switch-link');
-    expect(switchLinks).toHaveLength(1);
-    expect(switchLinks[0].text()).toContain('LDAP 登录');
+    expect(wrapper.text()).toContain('请选择登录方式，使用对应账号登录。');
+    const tabs = wrapper.findAll('.login-tab');
+    expect(tabs).toHaveLength(2);
+    const ldapTab = tabs.find(tab => tab.text().includes('LDAP 登录'));
+    expect(ldapTab).toBeTruthy();
 
-    await switchLinks[0].trigger('click');
-    expect(wrapper.text()).toContain('请使用LDAP 登录。');
-    const switchBackLink = wrapper.findAll('.login-provider-switch-link');
-    expect(switchBackLink).toHaveLength(1);
-    expect(switchBackLink[0].text()).toContain('账号密码登录');
+    await ldapTab!.trigger('click');
+    expect(ldapTab!.classes()).toContain('login-tab--active');
+    const backTab = tabs.find(tab => tab.text().includes('账号密码登录'));
+    expect(backTab!.classes()).not.toContain('login-tab--active');
 
     await wrapper.get('input[type="text"]').setValue('ops-user');
     await wrapper.get('input[type="password"]').setValue('Ldap@1234');
@@ -228,7 +233,7 @@ describe('LoginView', () => {
     resolveLogin!({
       message: '登录成功',
       user: {
-        userId: 1,
+        subjectId: 'sid-1',
         username: 'admin',
         displayName: 'admin',
         admin: true,
@@ -247,7 +252,7 @@ describe('LoginView', () => {
     const loginSpy = vi.spyOn(iamAuth, 'login').mockResolvedValue({
       message: '登录成功',
       user: {
-        userId: 1,
+        subjectId: 'sid-1',
         username: 'admin',
         displayName: 'admin',
         admin: true,
@@ -281,7 +286,7 @@ describe('LoginView', () => {
     vi.spyOn(iamAuth, 'login').mockResolvedValue({
       message: '登录成功',
       user: {
-        userId: 2,
+        subjectId: 'sid-2',
         username: 'user',
         displayName: 'user',
         admin: false,
@@ -314,7 +319,7 @@ describe('LoginView', () => {
       message: '登录成功',
       mustChangePassword: true,
       user: {
-        userId: 2,
+        subjectId: 'sid-2',
         username: 'user',
         displayName: 'user',
         admin: false,
@@ -347,7 +352,7 @@ describe('LoginView', () => {
       message: '登录成功',
       mustChangePassword: true,
       user: {
-        userId: 2,
+        subjectId: 'sid-2',
         username: 'user',
         displayName: 'user',
         admin: false,
@@ -405,7 +410,7 @@ describe('LoginView', () => {
     vi.spyOn(iamAuth, 'login').mockResolvedValue({
       message: '登录成功',
       user: {
-        userId: 1,
+        subjectId: 'sid-1',
         username: 'admin',
         displayName: 'admin',
         admin: true,
@@ -492,7 +497,7 @@ describe('LoginView', () => {
       .mockResolvedValueOnce({
         message: '登录成功',
         user: {
-          userId: 1,
+          subjectId: 'sid-1',
           username: 'admin',
           displayName: 'admin',
           admin: true,
@@ -600,7 +605,8 @@ describe('LoginView', () => {
           type: 'ldap',
           enabled: true,
           authorizeUrl: null,
-          description: null
+          description: null,
+          supportedRegions: null
         }
       ]
     });
@@ -621,7 +627,8 @@ describe('LoginView', () => {
     await flushPromises();
     expect(wrapper.find('.login-captcha').exists()).toBe(true);
 
-    await wrapper.findAll('.login-provider-switch-link')[0].trigger('click');
+    const ldapTab = wrapper.findAll('.login-tab').find(tab => tab.text().includes('LDAP 登录'));
+    await ldapTab!.trigger('click');
     await flushPromises();
 
     expect(wrapper.find('.login-captcha').exists()).toBe(false);

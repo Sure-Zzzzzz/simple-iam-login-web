@@ -5,7 +5,7 @@ export interface CsrfTokenResponse {
 }
 
 export interface AuthUser {
-  userId: number | null;
+  subjectId: string | null;
   username: string;
   displayName: string | null;
   admin: boolean;
@@ -35,6 +35,16 @@ export class LoginError extends Error {
   }
 }
 
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const failureBody = await response.json();
+    return typeof failureBody?.message === 'string' ? failureBody.message : '';
+  } catch {
+    // 响应体不可解析时由调用方使用各自的通用文案。
+    return '';
+  }
+}
+
 export interface ConsentInfo {
   registeredClientId: string;
   clientId: string;
@@ -53,6 +63,8 @@ export interface LoginProvider {
   enabled: boolean;
   authorizeUrl: string | null;
   description: string | null;
+  /** 短信投递支持的区号列表（逗号分隔带 + 前缀，如 "+86"），仅 phone 型登录方式携带 */
+  supportedRegions: string | null;
 }
 
 export interface LoginProvidersResponse {
@@ -72,6 +84,69 @@ export interface Branding {
 }
 
 export const DEFAULT_BRAND_NAME = '统一认证中心';
+
+export interface PhoneChallengePayload {
+  phone: string;
+  purpose: 'login' | 'forgot-password';
+}
+
+export interface PhoneChallengeResult {
+  challengeId: string;
+  /** 服务端同号冷却（秒），倒计时唯一事实源；缺省回退 60 */
+  resendAfterSeconds?: number;
+}
+
+export async function createPhoneChallenge(payload: PhoneChallengePayload): Promise<PhoneChallengeResult> {
+  const csrf = await fetchCsrfToken();
+  const response = await fetch('/iam/web/auth/phone-challenges', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
+    body: JSON.stringify(payload),
+  });
+  if (response.status === 404) {
+    throw new Error('短信能力未开放');
+  }
+  if (!response.ok) {
+    const serverMessage = await readErrorMessage(response);
+    throw new Error(serverMessage || '验证码发送失败，请稍后重试');
+  }
+  return response.json();
+}
+
+export async function phoneLogin(challengeId: string, code: string, phone: string): Promise<LoginResponse> {
+  const csrf = await fetchCsrfToken();
+  const response = await fetch('/iam/web/auth/phone-login', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
+    body: JSON.stringify({ challengeId, code, phone }),
+  });
+  if (!response.ok) {
+    const serverMessage = await readErrorMessage(response);
+    throw new Error(serverMessage || '验证码错误或已失效');
+  }
+  return response.json();
+}
+
+export async function resetPasswordByPhone(
+  challengeId: string,
+  code: string,
+  phone: string,
+  newPassword: string,
+): Promise<void> {
+  const csrf = await fetchCsrfToken();
+  const response = await fetch('/iam/web/auth/password-reset', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
+    body: JSON.stringify({ challengeId, code, phone, newPassword }),
+  });
+  if (!response.ok) {
+    const serverMessage = await readErrorMessage(response);
+    throw new Error(serverMessage || '密码重置失败，请检查验证码、手机号和新密码后重试');
+  }
+}
 
 export async function fetchLoginProviders(): Promise<LoginProvidersResponse> {
   const response = await fetch('/iam/web/auth/providers', {
